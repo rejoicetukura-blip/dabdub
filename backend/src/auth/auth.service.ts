@@ -1,335 +1,240 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  Inject,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { AuthService } from './auth.service';
+import * as crypto from 'crypto';
+import { jwtConfig } from '../config/jwt.config';
 import { User } from '../users/entities/user.entity';
 import { Role } from '../rbac/rbac.types';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { Session } from './entities/session.entity';
-import { jwtConfig } from '../config/jwt.config';
 import { CacheService } from '../cache/cache.service';
-import { GeoService } from '../geo/geo.service';
+import type { RegisterDto } from './dto/register.dto';
+import type { LoginDto } from './dto/login.dto';
+import type { TokenResponseDto } from './dto/token-response.dto';
 
-// ── Mocks ────────────────────────────────────────────────────────────────────
+export interface JwtPayload {
+  sub: string;
+  username: string;
+  role: 'user' | 'merchant' | 'admin' | 'super_admin';
+  sessionId: string;
+}
 
-const mockUserRepo = {
-  findOne: jest.fn(),
-  create: jest.fn(),
-  save: jest.fn(),
-};
+@Injectable()
+export class AuthService {
+  constructor(
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
 
-const mockTokenRepo = {
-  findOne: jest.fn(),
-  create: jest.fn(),
-  save: jest.fn(),
-};
+    @InjectRepository(RefreshToken)
+    private readonly tokenRepo: Repository<RefreshToken>,
 
-const mockSessionRepo = {
-  findOne: jest.fn(),
-  create: jest.fn(),
-  save: jest.fn(),
-};
+    @InjectRepository(Session)
+    private readonly sessionRepo: Repository<Session>,
 
-const mockJwtService = {
-  sign: jest.fn(),
-  verify: jest.fn(),
-  decode: jest.fn(),
-};
+    private readonly jwtService: JwtService,
 
-const mockJwtConfig = {
-  accessSecret: 'access-secret-32-chars-minimum!!',
-  refreshSecret: 'refresh-secret-32-chars-minimum!!',
-  accessExpiry: '15m',
-  refreshExpiry: '30d',
-};
+    @Inject(jwtConfig.KEY)
+    private readonly jwt: ConfigType<typeof jwtConfig>,
 
-const mockCacheService = {
-  trackActiveUser: jest.fn(),
-};
+    private readonly cacheService: CacheService,
+  ) {}
 
-const mockGeoService = {
-  getCountry: jest.fn().mockReturnValue('NG'),
-};
+  // ── Register ────────────────────────────────────────────────────
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+  async register(
+    dto: RegisterDto,
+    ipAddress?: string,
+    deviceInfo?: Record<string, unknown>,
+  ): Promise<TokenResponseDto> {
+    const [existingEmail, existingUsername] = await Promise.all([
+      this.userRepo.findOne({ where: { email: dto.email } }),
+      this.userRepo.findOne({ where: { username: dto.username } }),
+    ]);
 
-const makeUser = (overrides: Partial<User> = {}): User =>
-  ({
-    id: 'user-uuid-1',
-    email: 'alice@example.com',
-    username: 'alice',
-    passwordHash: '$2b$12$hashedpassword',
-    isAdmin: false,
-    role: Role.User,
-    isMerchant: false,
-    isActive: true,
-    isTreasury: false,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides,
-  }) as User;
+    if (existingEmail) {
+      throw new ConflictException('Email already in use');
+    }
+    if (existingUsername) {
+      throw new ConflictException('Username already taken');
+    }
 
-const makeRefreshToken = (
-  overrides: Partial<RefreshToken> = {},
-): RefreshToken =>
-  ({
-    id: 'rt-uuid-1',
-    userId: 'user-uuid-1',
-    tokenHash: 'a'.repeat(64),
-    sessionId: 'session-uuid-1',
-    deviceInfo: null,
-    ipAddress: null,
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    revokedAt: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    ...overrides,
-  }) as RefreshToken;
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+    const user = this.userRepo.create({
+      email: dto.email,
+      username: dto.username,
+      passwordHash,
+    });
+    await this.userRepo.save(user);
 
-// ── Suite ─────────────────────────────────────────────────────────────────────
+    const sessionId = crypto.randomUUID();
+    return this.issueTokens(user, sessionId, ipAddress, deviceInfo);
+  }
 
-describe('AuthService', () => {
-  let service: AuthService;
+  // ── Login ───────────────────────────────────────────────────────
 
-  beforeEach(async () => {
-    jest.clearAllMocks();
+  async login(
+    dto: LoginDto,
+    ipAddress?: string,
+    deviceInfo?: Record<string, unknown>,
+  ): Promise<TokenResponseDto> {
+    const user = await this.userRepo.findOne({ where: { email: dto.email } });
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        AuthService,
-        { provide: getRepositoryToken(User), useValue: mockUserRepo },
-        { provide: getRepositoryToken(RefreshToken), useValue: mockTokenRepo },
-        { provide: getRepositoryToken(Session), useValue: mockSessionRepo },
-        { provide: JwtService, useValue: mockJwtService },
-        { provide: jwtConfig.KEY, useValue: mockJwtConfig },
-        { provide: CacheService, useValue: mockCacheService },
-        { provide: GeoService, useValue: mockGeoService },
-      ],
-    }).compile();
+    const match = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!match) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
-    service = module.get<AuthService>(AuthService);
-  });
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is disabled');
+    }
 
-  // ── register ───────────────────────────────────────────────────────────────
+    const sessionId = crypto.randomUUID();
+    await this.cacheService.trackActiveUser(user.id);
+    return this.issueTokens(user, sessionId, ipAddress, deviceInfo);
+  }
 
-  describe('register', () => {
-    it('creates a user and returns a token pair', async () => {
-      mockUserRepo.findOne.mockResolvedValue(null); // no existing email/username
-      const user = makeUser();
-      mockUserRepo.create.mockReturnValue(user);
-      mockUserRepo.save.mockResolvedValue(user);
+  // ── Refresh ─────────────────────────────────────────────────────
 
-      const savedToken = makeRefreshToken();
-      mockTokenRepo.create.mockReturnValue(savedToken);
-      mockTokenRepo.save.mockResolvedValue(savedToken);
-      mockSessionRepo.create.mockReturnValue({});
-      mockSessionRepo.save.mockResolvedValue({});
-
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
-
-      const result = await service.register({
-        email: 'alice@example.com',
-        username: 'alice',
-        password: 'password123',
+  async refresh(rawRefreshToken: string): Promise<TokenResponseDto> {
+    let payload: JwtPayload;
+    try {
+      payload = this.jwtService.verify<JwtPayload>(rawRefreshToken, {
+        secret: this.jwt.refreshSecret,
       });
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
 
-      expect(result.accessToken).toBe('access-token');
-      expect(result.refreshToken).toBe('refresh-token');
-      expect(result.expiresIn).toBe(900); // 15m in seconds
+    const tokenHash = this.hashToken(rawRefreshToken);
+    const stored = await this.tokenRepo.findOne({
+      where: { tokenHash, sessionId: payload.sessionId },
     });
 
-    it('throws ConflictException when email already exists', async () => {
-      mockUserRepo.findOne
-        .mockResolvedValueOnce(makeUser()) // email exists
-        .mockResolvedValueOnce(null);
+    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+      throw new UnauthorizedException('Refresh token is invalid or revoked');
+    }
 
-      await expect(
-        service.register({
-          email: 'alice@example.com',
-          username: 'alice',
-          password: 'pass1234',
-        }),
-      ).rejects.toThrow(ConflictException);
+    // Revoke old token
+    stored.revokedAt = new Date();
+    await this.tokenRepo.save(stored);
+
+    const user = await this.userRepo.findOne({ where: { id: payload.sub } });
+    if (!user || !user.isActive) {
+      throw new UnauthorizedException('User not found or disabled');
+    }
+
+    return this.issueTokens(user, payload.sessionId);
+  }
+
+  // ── Logout ──────────────────────────────────────────────────────
+
+  async logout(sessionId: string): Promise<void> {
+    const token = await this.tokenRepo.findOne({ where: { sessionId } });
+    if (token && !token.revokedAt) {
+      token.revokedAt = new Date();
+      await this.tokenRepo.save(token);
+    }
+  }
+
+  // ── Issue tokens ────────────────────────────────────────────────
+
+  async issueTokens(
+    user: User,
+    sessionId: string,
+    ipAddress?: string,
+    deviceInfo?: Record<string, unknown>,
+  ): Promise<TokenResponseDto> {
+    const role: JwtPayload['role'] = user.isAdmin
+      ? 'admin'
+      : user.role === UserRole.MERCHANT
+        ? 'merchant'
+        : 'user';
+    const role: JwtPayload['role'] =
+      user.role === Role.SuperAdmin
+        ? 'super_admin'
+        : user.role === Role.Admin || user.isAdmin
+          ? 'admin'
+          : user.role === Role.Merchant
+            ? 'merchant'
+            : 'user';
+    const payload: JwtPayload = {
+      sub: user.id,
+      username: user.username,
+      role,
+      sessionId,
+    };
+
+    // @nestjs/jwt v11 signs expect expiresIn as a StringValue; cast to satisfy TS.
+    const accessToken = this.jwtService.sign(payload, {
+      secret: this.jwt.accessSecret,
+      expiresIn: this.jwt.accessExpiry as unknown as number,
     });
 
-    it('throws ConflictException when username already exists', async () => {
-      mockUserRepo.findOne
-        .mockResolvedValueOnce(null) // email ok
-        .mockResolvedValueOnce(makeUser()); // username taken
-
-      await expect(
-        service.register({
-          email: 'new@example.com',
-          username: 'alice',
-          password: 'pass1234',
-        }),
-      ).rejects.toThrow(ConflictException);
-    });
-  });
-
-  // ── login ──────────────────────────────────────────────────────────────────
-
-  describe('login', () => {
-    it('returns a token pair for valid credentials', async () => {
-      const hash = await bcrypt.hash('password123', 4); // low cost for tests
-      const user = makeUser({ passwordHash: hash });
-      mockUserRepo.findOne.mockResolvedValue(user);
-
-      const savedToken = makeRefreshToken();
-      mockTokenRepo.create.mockReturnValue(savedToken);
-      mockTokenRepo.save.mockResolvedValue(savedToken);
-      mockSessionRepo.create.mockReturnValue({});
-      mockSessionRepo.save.mockResolvedValue({});
-
-      mockJwtService.sign
-        .mockReturnValueOnce('access-token')
-        .mockReturnValueOnce('refresh-token');
-
-      const result = await service.login({
-        email: 'alice@example.com',
-        password: 'password123',
-      });
-      expect(result.accessToken).toBe('access-token');
+    const rawRefreshToken = this.jwtService.sign(payload, {
+      secret: this.jwt.refreshSecret,
+      expiresIn: this.jwt.refreshExpiry as unknown as number,
     });
 
-    it('throws UnauthorizedException for wrong password', async () => {
-      const hash = await bcrypt.hash('realpassword', 4);
-      mockUserRepo.findOne.mockResolvedValue(makeUser({ passwordHash: hash }));
+    const refreshExpMs = this.parseExpiry(this.jwt.refreshExpiry);
+    const expiresAt = new Date(Date.now() + refreshExpMs);
 
-      await expect(
-        service.login({
-          email: 'alice@example.com',
-          password: 'wrongpassword',
-        }),
-      ).rejects.toThrow(UnauthorizedException);
+    const tokenHash = this.hashToken(rawRefreshToken);
+    const refreshToken = this.tokenRepo.create({
+      userId: user.id,
+      tokenHash,
+      sessionId,
+      deviceInfo: deviceInfo ?? null,
+      ipAddress: ipAddress ?? null,
+      expiresAt,
     });
+    const savedToken = await this.tokenRepo.save(refreshToken);
 
-    it('throws UnauthorizedException when user not found', async () => {
-      mockUserRepo.findOne.mockResolvedValue(null);
+    await this.sessionRepo.save(
+      this.sessionRepo.create({
+        userId: user.id,
+        refreshTokenId: savedToken.id,
+        deviceInfo: deviceInfo ?? null,
+        ipAddress: ipAddress ?? null,
+        lastSeenAt: new Date(),
+      }),
+    );
 
-      await expect(
-        service.login({ email: 'ghost@example.com', password: 'pass' }),
-      ).rejects.toThrow(UnauthorizedException);
-    });
+    const accessExpMs = this.parseExpiry(this.jwt.accessExpiry);
 
-    it('throws UnauthorizedException for inactive account', async () => {
-      const hash = await bcrypt.hash('password123', 4);
-      mockUserRepo.findOne.mockResolvedValue(
-        makeUser({ passwordHash: hash, isActive: false }),
-      );
+    return {
+      accessToken,
+      refreshToken: rawRefreshToken,
+      expiresIn: Math.floor(accessExpMs / 1000),
+    };
+  }
 
-      await expect(
-        service.login({ email: 'alice@example.com', password: 'password123' }),
-      ).rejects.toThrow(UnauthorizedException);
-    });
-  });
+  // ── Helpers ─────────────────────────────────────────────────────
 
-  // ── refresh ────────────────────────────────────────────────────────────────
+  private hashToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
 
-  describe('refresh', () => {
-    it('rotates the refresh token and returns a new pair', async () => {
-      const payload = {
-        sub: 'user-uuid-1',
-        username: 'alice',
-        role: 'user',
-        sessionId: 'session-1',
-      };
-      mockJwtService.verify.mockReturnValue(payload);
-
-      const stored = makeRefreshToken({ sessionId: 'session-1' });
-      mockTokenRepo.findOne.mockResolvedValue(stored);
-      mockTokenRepo.save.mockResolvedValue({
-        ...stored,
-        revokedAt: new Date(),
-      });
-
-      const user = makeUser();
-      mockUserRepo.findOne.mockResolvedValue(user);
-
-      const newToken = makeRefreshToken({ id: 'rt-uuid-2' });
-      mockTokenRepo.create.mockReturnValue(newToken);
-      mockTokenRepo.save.mockResolvedValue(newToken);
-      mockSessionRepo.create.mockReturnValue({});
-      mockSessionRepo.save.mockResolvedValue({});
-
-      mockJwtService.sign
-        .mockReturnValueOnce('new-access-token')
-        .mockReturnValueOnce('new-refresh-token');
-
-      const result = await service.refresh('old-refresh-token');
-      expect(result.accessToken).toBe('new-access-token');
-      // Old token should have been revoked
-      expect(mockTokenRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ revokedAt: expect.any(Date) }),
-      );
-    });
-
-    it('throws 401 when refresh token is revoked', async () => {
-      const payload = {
-        sub: 'u1',
-        username: 'alice',
-        role: 'user',
-        sessionId: 's1',
-      };
-      mockJwtService.verify.mockReturnValue(payload);
-
-      const revokedToken = makeRefreshToken({ revokedAt: new Date() });
-      mockTokenRepo.findOne.mockResolvedValue(revokedToken);
-
-      await expect(service.refresh('revoked-token')).rejects.toThrow(
-        UnauthorizedException,
-      );
-    });
-
-    it('throws 401 when reusing a revoked refresh token (rotation guard)', async () => {
-      mockJwtService.verify.mockReturnValue({
-        sub: 'u1',
-        username: 'alice',
-        role: 'user',
-        sessionId: 's1',
-      });
-      // Token not found in DB (was previously rotated away)
-      mockTokenRepo.findOne.mockResolvedValue(null);
-
-      await expect(service.refresh('old-revoked-token')).rejects.toThrow(
-        UnauthorizedException,
-      );
-    });
-
-    it('throws 401 when verify fails (tampered / expired token)', async () => {
-      mockJwtService.verify.mockImplementation(() => {
-        throw new Error('jwt expired');
-      });
-
-      await expect(service.refresh('bad-token')).rejects.toThrow(
-        UnauthorizedException,
-      );
-    });
-  });
-
-  // ── logout ─────────────────────────────────────────────────────────────────
-
-  describe('logout', () => {
-    it('revokes the refresh token for the given sessionId', async () => {
-      const token = makeRefreshToken();
-      mockTokenRepo.findOne.mockResolvedValue(token);
-      mockTokenRepo.save.mockResolvedValue({ ...token, revokedAt: new Date() });
-
-      await service.logout('session-uuid-1');
-
-      expect(mockTokenRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ revokedAt: expect.any(Date) }),
-      );
-    });
-
-    it('is a no-op when token not found', async () => {
-      mockTokenRepo.findOne.mockResolvedValue(null);
-      await service.logout('nonexistent-session');
-      expect(mockTokenRepo.save).not.toHaveBeenCalled();
-    });
-  });
-});
+  /** Converts strings like "15m", "30d", "1h" to milliseconds. */
+  private parseExpiry(expiry: string): number {
+    const units: Record<string, number> = {
+      s: 1000,
+      m: 60 * 1000,
+      h: 60 * 60 * 1000,
+      d: 24 * 60 * 60 * 1000,
+    };
+    const match = /^(\d+)([smhd])$/.exec(expiry);
+    if (!match) return 15 * 60 * 1000;
+    return parseInt(match[1], 10) * (units[match[2]] ?? 1000);
+  }
+}

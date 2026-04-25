@@ -19,17 +19,13 @@ function encodeCursor(payload: CursorPayload): string {
 }
 
 function decodeCursor(raw: string): CursorPayload {
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(raw, 'base64url').toString('utf8'),
-    ) as CursorPayload;
-    if (!parsed?.createdAt || !parsed?.id) {
-      throw new Error('Invalid cursor');
-    }
-    return parsed;
-  } catch {
+  const parsed = JSON.parse(
+    Buffer.from(raw, 'base64url').toString('utf8'),
+  ) as CursorPayload;
+  if (!parsed?.createdAt || !parsed?.id) {
     throw new Error('Invalid cursor');
   }
+  return parsed;
 }
 
 @Injectable()

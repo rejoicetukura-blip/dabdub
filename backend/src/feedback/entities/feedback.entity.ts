@@ -1,12 +1,5 @@
-import {
-  Column,
-  Entity,
-  Index,
-  ManyToOne,
-  JoinColumn,
-} from 'typeorm';
+import { Column, Entity } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { User } from '../../users/entities/user.entity';
 
 export enum FeedbackType {
   TRANSACTION_RATING = 'transaction_rating',
@@ -19,12 +12,7 @@ export enum FeedbackType {
 @Entity('feedback')
 export class Feedback extends BaseEntity {
   @Column({ name: 'user_id' })
-  @Index()
   userId!: string;
-
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'user_id' })
-  user!: User;
 
   @Column({
     type: 'enum',

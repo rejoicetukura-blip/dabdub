@@ -5,13 +5,9 @@ import { SecurityController } from './security.controller';
 import { LoginHistory, SecurityAlert, TrustedDevice } from './entities';
 import { User } from '../users/entities/user.entity';
 import { Session } from '../auth/entities/session.entity';
-import { GeoModule } from '../geo/geo.module';
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([LoginHistory, SecurityAlert, TrustedDevice, User, Session]),
-    GeoModule,
-  ],
+  imports: [TypeOrmModule.forFeature([LoginHistory, SecurityAlert, TrustedDevice, User, Session])],
   providers: [SecurityService],
   controllers: [SecurityController],
   exports: [SecurityService],

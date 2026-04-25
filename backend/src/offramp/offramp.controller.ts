@@ -7,11 +7,8 @@ import {
   Query,
   Req,
   UseGuards,
-  UseInterceptors,
-  UploadedFile
 } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiConsumes, ApiBody } from '@nestjs/swagger';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OffRampService } from './offramp.service';
 import {
@@ -21,7 +18,6 @@ import {
   OffRampResponseDto,
   PreviewOffRampDto,
 } from './dto/offramp.dto';
-import { BulkDisbursementResponseDto } from './dto/bulk-disbursement.dto';
 
 @ApiTags('Off-Ramp')
 @UseGuards(JwtAuthGuard)
@@ -63,37 +59,5 @@ export class OffRampController {
     @Req() req: any,
   ): Promise<OffRampResponseDto> {
     return this.offRampService.getStatus(req.user.id, referenceId);
-  }
-
-  @Post('bulk/csv')
-  @UseInterceptors(FileInterceptor('file'))
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      properties: {
-        file: {
-          type: 'string',
-          format: 'binary',
-        },
-      },
-      required: ['file'],
-    },
-  })
-  @ApiOperation({ summary: 'Upload a CSV for bulk disbursements' })
-  uploadBulk(
-    @UploadedFile() file: Express.Multer.File,
-    @Req() req: any,
-  ): Promise<BulkDisbursementResponseDto> {
-    return this.offRampService.uploadBulkDisbursement(req.user.id, file);
-  }
-
-  @Get('bulk/:id')
-  @ApiOperation({ summary: 'Get bulk disbursement aggregate status' })
-  getBulkStatus(
-    @Param('id') id: string,
-    @Req() req: any,
-  ): Promise<BulkDisbursementResponseDto> {
-    return this.offRampService.getBulkDisbursementStatus(req.user.id, id);
   }
 }

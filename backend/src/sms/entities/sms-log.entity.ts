@@ -1,12 +1,5 @@
-import {
-  Entity,
-  Column,
-  Index,
-  ManyToOne,
-  JoinColumn,
-} from 'typeorm';
+import { Entity, Column } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { User } from '../../users/entities/user.entity';
 
 export enum SmsStatus {
   QUEUED = 'queued',
@@ -17,12 +10,7 @@ export enum SmsStatus {
 @Entity('sms_logs')
 export class SmsLog extends BaseEntity {
   @Column({ name: 'user_id', type: 'varchar', nullable: true, default: null })
-  @Index()
   userId!: string | null;
-
-  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'user_id' })
-  user!: User | null;
 
   @Column({ type: 'varchar', length: 20 })
   phone!: string;

@@ -19,7 +19,6 @@ import {
 import { PayLinkService } from './paylink.service';
 import { PinModule } from '../pin/pin.module';
 import { BalanceModule } from '../balance/balance.module';
-import { FeesModule } from '../fees/fees.module';
 
 @Module({
   imports: [
@@ -31,7 +30,6 @@ import { FeesModule } from '../fees/fees.module';
     EmailModule,
     NotificationsModule,
     BalanceModule,
-    FeesModule,
   ],
   controllers: [PayLinkController],
   providers: [PayLinkService, PayLinkProcessor],

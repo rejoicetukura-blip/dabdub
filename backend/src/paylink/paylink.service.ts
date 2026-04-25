@@ -25,8 +25,6 @@ import { ListPayLinksQueryDto } from './dto/list-pay-links-query.dto';
 import { PayLinkPublicDto } from './dto/pay-link-public.dto';
 import { PayLink, PayLinkStatus } from './entities/pay-link.entity';
 import { BalanceService } from '../balance/balance.service';
-import { FeesService } from '../fees/fees.service';
-import { FeeType } from '../fee-config/entities/fee-config.entity';
 
 const DEFAULT_EXPIRES_HOURS = 72;
 const PAYLINK_TOKEN_SIZE = 10;
@@ -65,7 +63,6 @@ export class PayLinkService {
     private readonly emailService: EmailService,
     private readonly notificationService: NotificationService,
     private readonly balanceService: BalanceService,
-    private readonly feesService: FeesService,
   ) {}
 
   async countActiveReceiveLinks(creatorUserId: string): Promise<number> {
@@ -195,15 +192,10 @@ export class PayLinkService {
     payLink.paymentTxHash = paymentTxHash;
     const saved = await this.payLinkRepo.save(payLink);
 
-    const computedFee = await this.feesService.computeFee(
-      FeeType.PAYLINK,
-      payLink.amount,
-    );
-
     await this.transactionRepo.save(
       this.transactionRepo.create({
         userId: payer.id,
-        type: TransactionType.PAYLINK_SENT,
+        type: TransactionType.TRANSFER,
         amount: Number(payLink.amount),
         currency: 'USDC',
         status: TransactionStatus.COMPLETED,
@@ -212,30 +204,17 @@ export class PayLinkService {
       }),
     );
 
-    const merchantTx = await this.transactionRepo.save(
+    await this.transactionRepo.save(
       this.transactionRepo.create({
         userId: creator.id,
-        type: TransactionType.PAYLINK_RECEIVED,
-        amount: Number(computedFee.net),
+        type: TransactionType.TRANSFER,
+        amount: Number(payLink.amount),
         currency: 'USDC',
         status: TransactionStatus.COMPLETED,
         reference: tokenId,
-        fee: computedFee.fee,
         description: `PayLink payment received from ${payer.username}`,
       }),
     );
-
-    if (parseFloat(computedFee.fee) > 0) {
-      await this.feesService.recordFee({
-        userId: creator.id,
-        txType: FeeType.PAYLINK,
-        txId: merchantTx.id,
-        grossAmount: computedFee.gross,
-        feeAmount: computedFee.fee,
-        netAmount: computedFee.net,
-        feeConfigId: computedFee.feeConfigId,
-      });
-    }
 
     // Invalidate balance cache for both users
     await this.balanceService.invalidateCache(payer.id);

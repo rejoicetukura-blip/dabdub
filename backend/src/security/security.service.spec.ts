@@ -5,7 +5,6 @@ import { SecurityService } from './security.service';
 import { LoginHistory, LoginStatus, LoginFailureReason, SecurityAlert, SecurityAlertType, TrustedDevice } from './entities';
 import { User, KycStatus } from '../users/entities/user.entity';
 import { Session } from '../auth/entities/session.entity';
-import { GeoService } from '../geo/geo.service';
 
 describe('SecurityService', () => {
   let service: SecurityService;
@@ -71,12 +70,6 @@ describe('SecurityService', () => {
           provide: getRepositoryToken(Session),
           useValue: {
             count: jest.fn(),
-          },
-        },
-        {
-          provide: GeoService,
-          useValue: {
-            getCountry: jest.fn().mockReturnValue('NG'),
           },
         },
       ],
@@ -173,7 +166,6 @@ describe('SecurityService', () => {
         userId: 'user-123',
         ipAddress: '192.168.1.1',
         userAgent: 'Mozilla/5.0',
-        country: 'NG',
         status: LoginStatus.SUCCESS,
         failureReason: null,
       });
@@ -198,7 +190,6 @@ describe('SecurityService', () => {
         userId: 'user-123',
         ipAddress: '192.168.1.1',
         userAgent: 'Mozilla/5.0',
-        country: 'NG',
         status: LoginStatus.FAILED,
         failureReason: LoginFailureReason.INVALID_PASSWORD,
       });

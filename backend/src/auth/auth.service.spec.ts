@@ -9,8 +9,6 @@ import { Role } from '../rbac/rbac.types';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { Session } from './entities/session.entity';
 import { jwtConfig } from '../config/jwt.config';
-import { CacheService } from '../cache/cache.service';
-import { GeoService } from '../geo/geo.service';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -43,14 +41,6 @@ const mockJwtConfig = {
   refreshSecret: 'refresh-secret-32-chars-minimum!!',
   accessExpiry: '15m',
   refreshExpiry: '30d',
-};
-
-const mockCacheService = {
-  trackActiveUser: jest.fn(),
-};
-
-const mockGeoService = {
-  getCountry: jest.fn().mockReturnValue('NG'),
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -104,8 +94,6 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(Session), useValue: mockSessionRepo },
         { provide: JwtService, useValue: mockJwtService },
         { provide: jwtConfig.KEY, useValue: mockJwtConfig },
-        { provide: CacheService, useValue: mockCacheService },
-        { provide: GeoService, useValue: mockGeoService },
       ],
     }).compile();
 

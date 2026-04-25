@@ -3,12 +3,9 @@ import {
   CreateDateColumn,
   Entity,
   Index,
-  ManyToOne,
-  JoinColumn,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { User } from '../../users/entities/user.entity';
 
 export enum ReferralStatus {
   PENDING = 'pending',
@@ -21,24 +18,16 @@ export enum ReferralStatus {
 @Index(['referrerId'])
 @Index(['referredUserId'], { unique: true })
 @Index(['status'])
-@Index(['code'], { unique: true })
+@Index(['code'])
 export class Referral {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ name: 'referrer_id' })
+  @Column()
   referrerId!: string;
 
-  @Column({ name: 'referred_user_id' })
+  @Column()
   referredUserId!: string;
-
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'referrer_id' })
-  referrer!: User;
-
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'referred_user_id' })
-  referredUser!: User;
 
   @Column()
   code!: string;

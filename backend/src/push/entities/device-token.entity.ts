@@ -1,14 +1,6 @@
-import {
-  Entity,
-  Column,
-  Index,
-  ManyToOne,
-  JoinColumn,
-} from 'typeorm';
+import { Entity, Column, Index } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { User } from '../../users/entities/user.entity';
-
-type PushSubscription = Record<string, unknown>;
+import type { PushSubscription } from 'web-push';
 
 export enum DevicePlatform {
   IOS = 'ios',
@@ -20,10 +12,6 @@ export enum DevicePlatform {
 export class DeviceToken extends BaseEntity {
   @Column({ name: 'user_id', type: 'varchar' })
   userId!: string;
-
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'user_id' })
-  user!: User;
 
   @Index({ unique: true })
   @Column({ type: 'varchar', length: 512 })
