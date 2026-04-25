@@ -2,24 +2,29 @@ import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 import { User } from '../../users/entities/user.entity';
 
-export enum SecurityAlertType {
-  NEW_DEVICE = 'new_device',
-  NEW_COUNTRY = 'new_country',
-  PIN_ATTEMPTS = 'pin_attempts',
-  LARGE_WITHDRAWAL = 'large_withdrawal',
-  SUSPICIOUS_IP = 'suspicious_ip',
+export enum LoginStatus {
+  SUCCESS = 'success',
+  FAILED = 'failed',
+  BLOCKED = 'blocked',
+}
+
+export enum LoginFailureReason {
+  INVALID_PASSWORD = 'invalid_password',
+  INVALID_EMAIL = 'invalid_email',
+  ACCOUNT_DISABLED = 'account_disabled',
+  TOO_MANY_ATTEMPTS = 'too_many_attempts',
+  UNKNOWN = 'unknown',
 }
 
 /**
- * SecurityAlert
+ * LoginHistory
  *
- * Auto-generated alerts for suspicious or notable account activity.
- * Users can view and dismiss alerts from the security dashboard.
+ * Records every login attempt (success or failure).
+ * Used to detect suspicious activity and display login history to users.
  */
-@Entity('security_alerts')
-@Index('IDX_security_alerts_user_created_at', { synchronize: false }, ['userId', 'createdAt'])
-@Index('IDX_security_alerts_user_unread', { synchronize: false }, ['userId', 'isRead'])
-export class SecurityAlert extends BaseEntity {
+@Entity('login_history')
+@Index('IDX_login_history_user_created_at', { synchronize: false }, ['userId', 'createdAt'])
+export class LoginHistory extends BaseEntity {
   @Column()
   userId!: string;
 
@@ -27,17 +32,28 @@ export class SecurityAlert extends BaseEntity {
   @JoinColumn({ name: 'user_id' })
   user!: User;
 
+  @Column({ nullable: true })
+  ipAddress!: string | null;
+
+  @Column({ nullable: true })
+  userAgent!: string | null;
+
+  @Column({ nullable: true, comment: 'Reverse geocoded location from IP address' })
+  location!: string | null;
+
   @Column({
     type: 'enum',
-    enum: SecurityAlertType,
+    enum: LoginStatus,
+    default: LoginStatus.SUCCESS,
   })
-  type!: SecurityAlertType;
+  status!: LoginStatus;
 
-  @Column()
-  message!: string;
-
-  @Column({ name: 'is_read', default: false })
-  isRead!: boolean;
+  @Column({
+    type: 'enum',
+    enum: LoginFailureReason,
+    nullable: true,
+  })
+  failureReason!: LoginFailureReason | null;
 
   @Column({
     type: 'timestamp',

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
 import { Transfer } from './entities/transfer.entity';
+import { FeeConfig } from '../fee-config/entities/fee-config.entity';
 import { Transaction } from '../transactions/entities/transaction.entity';
 import { TransfersService, TRANSFER_QUEUE } from './transfers.service';
 import { TransfersController } from './transfers.controller';
@@ -14,11 +15,10 @@ import { WsModule } from '../ws/ws.module';
 import { EmailModule } from '../email/email.module';
 import { PinModule } from '../pin/pin.module';
 import { COMPLIANCE_QUEUE } from '../compliance/compliance.service';
-import { FeesModule } from '../fees/fees.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Transfer, Transaction]),
+    TypeOrmModule.forFeature([Transfer, FeeConfig, Transaction]),
     BullModule.registerQueue({ name: TRANSFER_QUEUE }),
     BullModule.registerQueue({ name: COMPLIANCE_QUEUE }),
     SorobanModule,
@@ -28,7 +28,6 @@ import { FeesModule } from '../fees/fees.module';
     WsModule,
     EmailModule,
     PinModule,
-    FeesModule,
   ],
   controllers: [TransfersController],
   providers: [TransfersService, TransferProcessor],

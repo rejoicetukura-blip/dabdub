@@ -1,12 +1,5 @@
-import {
-  Entity,
-  Column,
-  Index,
-  ManyToOne,
-  JoinColumn,
-} from 'typeorm';
+import { Entity, Column, Index } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
-import { User } from '../../users/entities/user.entity';
 
 export enum PasskeyDeviceType {
   SINGLE_DEVICE = 'singleDevice',
@@ -19,10 +12,6 @@ export enum PasskeyDeviceType {
 export class PasskeyCredential extends BaseEntity {
   @Column({ name: 'user_id' })
   userId!: string;
-
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'user_id' })
-  user!: User;
 
   /** Base64url-encoded credential identifier (unique per credential). */
   @Column({ name: 'credential_id', length: 512 })

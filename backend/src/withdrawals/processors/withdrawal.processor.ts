@@ -12,20 +12,10 @@ import {
 } from '../withdrawals.service';
 import { Withdrawal } from '../entities/withdrawal.entity';
 import { SorobanService } from '../../soroban/soroban.service';
-import {
-  Transaction,
-  TransactionType,
-  TransactionStatus,
-} from '../../transactions/entities/transaction.entity';
+import { Transaction, TransactionType, TransactionStatus } from '../../transactions/entities/transaction.entity';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { BalanceService } from '../../balance/balance.service';
-import {
-  COMPLIANCE_QUEUE,
-  CHECK_TRANSACTION_JOB,
-  type CheckTransactionJobData,
-} from '../../compliance/compliance.service';
-import { FeesService } from '../../fees/fees.service';
-import { FeeType } from '../../fee-config/entities/fee-config.entity';
+import { COMPLIANCE_QUEUE, CHECK_TRANSACTION_JOB, type CheckTransactionJobData } from '../../compliance/compliance.service';
 
 export interface ProcessWithdrawalJobData {
   withdrawalId: string;
@@ -44,7 +34,6 @@ export class WithdrawalProcessor {
 
     private readonly notificationsService: NotificationsService,
     private readonly balanceService: BalanceService,
-    private readonly feesService: FeesService,
 
     @InjectQueue(COMPLIANCE_QUEUE)
     private readonly complianceQueue: Queue,
@@ -54,7 +43,6 @@ export class WithdrawalProcessor {
   async handle(job: Job<ProcessWithdrawalJobData>): Promise<void> {
     const { withdrawalId } = job.data;
     this.logger.log(`Processing withdrawal job for ${withdrawalId}`);
-    let withdrawal: Withdrawal | null = null;
 
     // Wrap in Sentry span for performance monitoring
     await Sentry.startSpan(
@@ -69,19 +57,16 @@ export class WithdrawalProcessor {
         },
       },
       async () => {
-        withdrawal = await this.withdrawalsService.markProcessing(withdrawalId);
+        const withdrawal = await this.withdrawalsService.markProcessing(withdrawalId);
 
-        const result = (await this.sorobanService.withdraw(
+        const result = await this.sorobanService.withdraw(
           withdrawal.userId,
           withdrawal.amount,
-        )) as { txHash?: string } | null;
+        ) as { txHash?: string } | null;
 
         const txHash = result?.txHash ?? `withdrawal-${withdrawalId}`;
 
-        const confirmed = await this.withdrawalsService.markConfirmed(
-          withdrawalId,
-          txHash,
-        );
+        const confirmed = await this.withdrawalsService.markConfirmed(withdrawalId, txHash);
 
         const savedTx = await this.transactionRepo.save(
           this.transactionRepo.create({
@@ -96,41 +81,20 @@ export class WithdrawalProcessor {
           }),
         );
 
-        if (withdrawal.feeConfigId && parseFloat(withdrawal.fee) > 0) {
-          await this.feesService.recordFee({
-            userId: withdrawal.userId,
-            txType: FeeType.WITHDRAWAL,
-            txId: savedTx.id,
-            grossAmount: withdrawal.amount,
-            feeAmount: withdrawal.fee,
-            netAmount: withdrawal.netAmount,
-            feeConfigId: withdrawal.feeConfigId,
-          });
-        }
+      // Invalidate balance cache
+      await this.balanceService.invalidateCache(withdrawal.userId);
 
-        // Invalidate balance cache
-        await this.balanceService.invalidateCache(withdrawal.userId);
+      // Enqueue async AML compliance check (non-blocking)
+      await this.complianceQueue.add(
+        CHECK_TRANSACTION_JOB,
+        { userId: withdrawal.userId, amount: parseFloat(withdrawal.netAmount), txId: savedTx.id } satisfies CheckTransactionJobData,
+        { attempts: 3, backoff: { type: 'exponential', delay: 3_000 }, removeOnComplete: true },
+      );
 
-        // Enqueue async AML compliance check (non-blocking)
-        await this.complianceQueue.add(
-          CHECK_TRANSACTION_JOB,
-          {
-            userId: withdrawal.userId,
-            amount: parseFloat(withdrawal.netAmount),
-            txId: savedTx.id,
-          } satisfies CheckTransactionJobData,
-          {
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 3_000 },
-            removeOnComplete: true,
-          },
-        );
-
+      await this.notificationsService.notifyWithdrawalConfirmed(confirmed);
         await this.notificationsService.notifyWithdrawalConfirmed(confirmed);
 
-        this.logger.log(
-          `Withdrawal ${withdrawalId} confirmed. txHash=${txHash}`,
-        );
+        this.logger.log(`Withdrawal ${withdrawalId} confirmed. txHash=${txHash}`);
       },
     ).catch(async (error: unknown) => {
       const reason = error instanceof Error ? error.message : String(error);
@@ -146,12 +110,7 @@ export class WithdrawalProcessor {
       });
 
       await this.withdrawalsService.markFailed(withdrawalId, reason);
-      if (withdrawal) {
-        await this.notificationsService.notifyWithdrawalFailed(
-          withdrawal,
-          reason,
-        );
-      }
+      await this.notificationsService.notifyWithdrawalFailed(withdrawal, reason);
 
       throw error;
     });
