@@ -50,8 +50,7 @@ import { MaintenanceModule } from './maintenance/maintenance.module';
 import { MaintenanceWindowMiddleware } from './maintenance/middleware/maintenance-window.middleware';
 
 // TODO: Enable Sentry when @sentry/nestjs module is compatible
-// import { SentryModule } from '@sentry/nestjs';
-import { AlertModule } from './alert/alert.module';
+// import { SentryModule } from '@nestjs/nestjs';
 import { GroupsModule } from './groups/groups.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { PushModule } from './push/push.module';
@@ -69,17 +68,24 @@ import { ActivityModule } from './activity/activity.module';
 import { BalanceModule } from './balance/balance.module';
 import { SentryModule as SentryUserContextModule } from './sentry/sentry.module';
 import { SentryUserMiddleware } from './sentry/sentry-user.middleware';
-import { OtpModule } from './otp/otp.module';
 import { PwaModule } from './pwa/pwa.module';
 import { SecurityHeadersMiddleware } from './security/security-headers.middleware';
+import { SensitiveAccessLogMiddleware } from './security/sensitive-access.middleware';
+import { TlsEnforcementMiddleware } from './security/tls-enforcement.middleware';
 import { ComplianceModule } from './compliance/compliance.module';
 import { DisputesModule } from './disputes/disputes.module';
 import { UsernameModule } from './username/username.module';
+import { GroupExpensesModule } from './group-expenses/group-expenses.module';
 import { SplitsModule } from './splits/splits.module';
 import { FeedbackModule } from './feedback/feedback.module';
+import { FeesModule } from './fees/fees.module';
 import { DeepLinkModule } from './deeplink/deeplink.module';
 import { FlutterwaveModule } from './flutterwave/flutterwave.module';
 import { FeatureFlagModule } from './feature-flags/feature-flag.module';
+import { BulkPaymentModule } from './bulk-payments/bulk-payment.module';
+import { PayoutsModule } from './payouts/payouts.module';
+import { GeoModule } from './geo/geo.module';
+import { GeoBlockMiddleware } from './geo/geo-block.middleware';
 
 @Module({
   imports: [
@@ -163,12 +169,12 @@ import { FeatureFlagModule } from './feature-flags/feature-flag.module';
     UsersModule,
     PinModule,
     TransfersModule,
+    BulkPaymentModule,
     WithdrawalsModule,
     SecurityModule,
     SandboxModule,
     FeatureFlagsModule,
     MaintenanceModule,
-    AlertModule,
     GroupsModule,
     BankAccountsModule,
     VirtualAccountModule,
@@ -232,10 +238,10 @@ import { FeatureFlagModule } from './feature-flags/feature-flag.module';
     DisputesModule,
     UsernameModule,
 
-
     // Splits — split payment requests among multiple users.
     SplitsModule,
     FeedbackModule,
+    FeesModule,
 
     // Deep linking — universal links, AASA, asset links, QR web fallbacks.
     DeepLinkModule,
@@ -245,6 +251,9 @@ import { FeatureFlagModule } from './feature-flags/feature-flag.module';
 
     // User-level feature flags (rollouts, A/B) — Redis-cached evaluation.
     FeatureFlagModule,
+    GeoModule,
+
+    PayoutsModule,
 
   ],
 
@@ -270,9 +279,12 @@ import { FeatureFlagModule } from './feature-flags/feature-flag.module';
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
     consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+    consumer.apply(GeoBlockMiddleware).forRoutes('*');
     consumer.apply(MaintenanceModeMiddleware).forRoutes('*');
     consumer.apply(MaintenanceWindowMiddleware).forRoutes('*');
     consumer.apply(SentryUserMiddleware).forRoutes('*');
     consumer.apply(SecurityHeadersMiddleware).forRoutes('*');
+    consumer.apply(TlsEnforcementMiddleware).forRoutes('*');
+    consumer.apply(SensitiveAccessLogMiddleware).forRoutes('*');
   }
 }
